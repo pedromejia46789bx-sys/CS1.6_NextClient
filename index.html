@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NextClient — CS 1.6 Landing (Clone)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg: #ffffff;
+      --ink: #0d0f12;
+      --muted:#5c667a;
+      --primary:#1e66ff;
+      --primary-ink:#0f3fb3;
+      --accent:#cfe2ff;
+      --surface:#f2f6ff;
+      --ring:#e7edf9;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color:var(--ink);
+      background: var(--bg);
+      overflow-x: hidden;
+    }
+
+    .site{position:relative;min-height:100dvh;display:flex;flex-direction:column;isolation:isolate}
+
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px clamp(16px, 5vw, 48px);position:relative;z-index:2}
+    .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:0.2px}
+    .brand svg{width:28px;height:28px}
+    .brand span{font-size:18px}
+
+    .actions{display:flex;align-items:center;gap:12px}
+    .iconbtn{width:40px;height:40px;border-radius:999px;border:1px solid var(--ring);display:grid;place-items:center;background:#fff;cursor:pointer;transition:transform .15s ease, box-shadow .15s ease;box-shadow:0 1px 0 0 rgba(13,15,18,.04), 0 8px 24px rgba(13,15,18,.06)}
+    .iconbtn:hover{transform:translateY(-1px)}
+
+    .hero{display:grid;grid-template-columns: 1.1fr 1fr;gap: clamp(24px, 4vw, 56px);align-items:center;padding: 24px clamp(16px, 5vw, 48px) 64px;position:relative;z-index:1}
+    .headline{font-size: clamp(36px, 5.6vw, 64px);line-height:1.02;font-weight:900;letter-spacing:-.8px;margin: 8px 0 18px}
+    .headline a{color:var(--primary);text-decoration:none}
+    .accentword{color:var(--primary);font-weight:900}
+
+    .lead{color:var(--muted);font-size: clamp(14px, 1.9vw, 16px);line-height:1.6;max-width: 60ch}
+
+    .cta{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}
+    .btn{appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:10px;padding:14px 18px;border-radius:999px;font-weight:800;font-size:16px;transition:transform .15s ease, box-shadow .15s ease, background .2s ease}
+    .btn-primary{background:var(--primary);color:#fff;box-shadow:0 10px 24px rgba(30,102,255,.28)}
+    .btn-primary:hover{transform:translateY(-1px);background:#1556e6}
+    .btn-outline{background:#fff;border:1px solid var(--ring);color:#0d0f12}
+    .subtag{font-size:12px;opacity:.75;margin-left:10px}
+
+    .mock{position:relative;aspect-ratio: 1.3/1;min-height:360px;border-radius:28px;overflow:hidden;box-shadow:0 40px 80px rgba(13,15,18,.18), inset 0 0 0 1px rgba(255,255,255,.08);background: radial-gradient(1200px 600px at 30% 20%, #102c57 0, #121a28 40%, #0d121c 100%)}
+    .scanline{position:absolute;inset:0;background-image:repeating-linear-gradient(to bottom, rgba(255,255,255,.06), rgba(255,255,255,.06) 1px, transparent 1px, transparent 3px);mix-blend:overlay;opacity:.25}
+
+    .panel{position:absolute;left:8%;bottom:12%;width:min(520px, 86%);background:#2d3a4f;border:1px solid rgba(255,255,255,.08);color:#eaf1ff;border-radius:14px;padding:16px;box-shadow:0 14px 34px rgba(0,0,0,.35);font-size:14px}
+    .panel small{opacity:.8}
+    .row{display:flex;align-items:center;justify-content:space-between;margin:6px 0 10px}
+    .bar{height:12px;border-radius:32px;background:rgba(255,255,255,.1);overflow:hidden}
+    .bar > span{display:block;height:100%;width:0%;background:linear-gradient(90deg,#8fd0ff,#e7ff7a)}
+    .bar.thin{height:10px}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);font-size:12px}
+
+    .blob{position:absolute;right:-20vw;top:-10vh;width:80vw;height:80vh;border-top-left-radius:60vw;border-bottom-left-radius:60vw;background: radial-gradient(100% 100% at 30% 20%, #d7e7ff 0, #b8d1ff 40%, #a7c4ff 60%, #cfe0ff 100%);filter:saturate(125%);z-index:0;opacity:.7}
+
+    footer{padding:28px clamp(16px, 5vw, 48px);color:#6b778e;font-size:14px}
+
+    @media (max-width: 980px){.hero{grid-template-columns:1fr}.mock{order:-1}}
+  </style>
+</head>
+<body>
+  <div class="site">
+    <div class="blob" aria-hidden="true"></div>
+
+    <header>
+      <div class="brand" title="NextClient">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M12 2.5l2.6 5.6 6.1.6-4.6 4 1.3 6-5.4-2.9-5.4 2.9 1.3-6-4.6-4 6.1-.6L12 2.5z" stroke="#0d0f12" stroke-width="1.5" fill="#fff"/>
+        </svg>
+        <span>NEXTCLIENT</span>
+      </div>
+      <div class="actions">
+        <button class="iconbtn" aria-label="GitHub" title="GitHub">G</button>
+        <button class="iconbtn" aria-label="Telegram" title="Telegram">T</button>
+      </div>
+    </header>
+
+    <main class="hero">
+      <section>
+        <h1 class="headline">A modern, under development <a href="#">CS 1.6</a> client based on 8684 steam version, enriched with <span class="accentword">genuine</span> features</h1>
+        <p class="lead">NextClient aims to introduce those features that Counter‑Strike players have been dreaming about for years. Enhanced security, redesigned interface with the ability to change the theme, fastest download of resources and list of game servers, Steam player avatars and more.</p>
+        <div class="cta">
+          <button class="btn btn-outline" id="learnMore">Learn More</button>
+          <button class="btn btn-primary" id="download">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download <span class="subtag">assemble & save</span>
+          </button>
+        </div>
+      </section>
+
+      <aside class="mock" aria-label="App preview">
+        <div class="scanline" aria-hidden="true"></div>
+        <div class="panel" role="dialog" aria-label="Загрузка…">
+          <div class="row">
+            <strong>Загрузка…</strong>
+            <span class="pill"><small>Осталось:</small><b id="eta">1 сек</b></span>
+          </div>
+          <div class="row">
+            <small>Файлы: <b id="files">0</b> / 51</small>
+            <small><span id="mb">0.0</span> / 55.6 MB, <span id="speed">0.0</span> MB/s</small>
+          </div>
+          <div class="bar"><span id="bar1"></span></div>
+          <div style="height:10px"></div>
+          <div class="row" style="margin-top:8px"><small>models/wpn_v8/v_knife.mdl</small> <small>Отмена</small></div>
+          <div class="bar thin"><span id="bar2"></span></div>
+        </div>
+      </aside>
+    </main>
+
+    <footer>
+      <span>Unofficial educational clone created for personal use. All names are placeholders.</span>
+    </footer>
+  </div>
+
+  <script>
+    const $ = (q)=>document.querySelector(q);
+    const bar1 = $('#bar1');
+    const bar2 = $('#bar2');
+    const files = $('#files');
+    const mb = $('#mb');
+    const speed = $('#speed');
+    const eta = $('#eta');
+    let t = 0, totalFiles = 51, totalMb = 55.6;
+
+    function tick(){
+      t = Math.min(1, t + (Math.random()*0.025 + 0.01));
+      const eased = 1 - Math.pow(1 - t, 3);
+      bar1.style.width = (eased*100).toFixed(2)+'%';
+      bar2.style.width = (Math.min(1, eased*1.12)*100).toFixed(2)+'%';
+      files.textContent = Math.round(totalFiles*eased);
+      const doneMb = (totalMb*eased);
+      mb.textContent = doneMb.toFixed(1);
+      const spd = (0.9 + Math.random()*2.1).toFixed(2);
+      speed.textContent = spd;
+      const remain = Math.max(0, (1-eased)*8);
+      eta.textContent = (remain<1? (remain*1000|0)/1000 + ' сек' : Math.ceil(remain) + ' сек');
+      if(t<1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    const panel = document.querySelector('.panel');
+    let dir = 1, y = 0;
+    function float(){
+      y += 0.06*dir;
+      if(y>6 || y<-6) dir*=-1;
+      panel.style.transform = `translateY(${y}px)`;
+      requestAnimationFrame(float);
+    }
+    requestAnimationFrame(float);
+      
+    // ------- Multi‑part ZIP assembler (z01..zNN + .zip) -------
+    // CONFIGURACIÓN — AJUSTA A TU CASO
+    const FILE_BASE   = 'CS1.6_NextClient'; // sin extensión
+    const PART_COUNT  = 26;                  // cantidad de partes .z01..zNN
+    const BASE_PATH   = './';                // carpeta donde están las partes (./ si están junto al index)
+    const EXT_PAD     = 2;                   // z01..z09 => 2; z001..z999 => 3
+    const DEBUG       = true;                // muestra diagnósticos en consola
+
+    function partName(i){
+      const n = String(i).padStart(EXT_PAD,'0');
+      return `${BASE_PATH}${FILE_BASE}.z${n}`;
+    }
+
+    async function fetchWithRetry(url, tries=2){
+      for(let k=0;k<=tries;k++){
+        try{
+          const res = await fetch(url);
+          if(!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
+          return new Uint8Array(await res.arrayBuffer());
+        }catch(e){
+          if(DEBUG) console.error(`[retry ${k}]`, e);
+          if(k===tries) throw e;
+          await new Promise(r=>setTimeout(r, 600*(k+1)));
+        }
+      }
+    }
+
+    async function headExists(url){
+      try{
+        const res = await fetch(url, {method:'HEAD'});
+        return res.ok;
+      }catch{ return false }
+    }
+
+    async function assembleZip(){
+      const btn = document.getElementById('download');
+      btn.disabled = true; btn.textContent = 'Assembling…';
+
+      // Comprobación temprana: ¿estamos en file:// ? Eso rompe fetch.
+      if(location.protocol === 'file:'){
+        alert('Estás abriendo el HTML con file://\nInicia un servidor local (p.ej. "python -m http.server") para que fetch funcione.');
+        btn.disabled = false; btn.textContent = 'Download';
+        return;
+      }
+
+      // Validar existencia de partes antes de descargar todo
+      for(let i=1;i<=PART_COUNT;i++){
+        const url = partName(i);
+        const ok = await headExists(url);
+        if(!ok){
+          alert(`No se encontró la parte: ${url}\nVerifica nombre EXACTO (mayús/minús, extensión .z${String(i).padStart(EXT_PAD,'0')}) y carpeta.`);
+          btn.disabled = false; btn.textContent = 'Download (retry)';
+          return;
+        }
+      }
+      const lastUrl = `${BASE_PATH}${FILE_BASE}.zip`;
+      if(!(await headExists(lastUrl))){
+        alert(`No se encontró el último segmento: ${lastUrl}`);
+        btn.disabled = false; btn.textContent = 'Download (retry)';
+        return;
+      }
+
+      const chunks = [];
+      const totalSegments = PART_COUNT + 1; // incluye el .zip final
+      let seg = 0, downloadedBytes = 0;
+
+      async function grab(url){
+        if(DEBUG) console.log('descargando', url);
+        const data = await fetchWithRetry(url);
+        downloadedBytes += data.byteLength;
+        seg++;
+        const p = Math.min(1, seg/totalSegments);
+        bar1.style.width = (p*100).toFixed(2)+'%';
+        bar2.style.width = (p*100).toFixed(2)+'%';
+        files.textContent = seg;  mb.textContent = (downloadedBytes/1048576).toFixed(1);
+        speed.textContent = '—';   eta.textContent = `${totalSegments-seg} seg`;
+        return data;
+      }
+
+      try{
+        for(let i=1;i<=PART_COUNT;i++) chunks.push(await grab(partName(i)));
+        chunks.push(await grab(lastUrl));
+
+        const total = chunks.reduce((s,u)=>s+u.byteLength,0);
+        const out = new Uint8Array(total);
+        let off = 0; for(const c of chunks){ out.set(c, off); off += c.byteLength; }
+
+        const blob = new Blob([out], {type:'application/zip'});
+        const url = URL.createObjectURL(blob);
+        const a = Object.assign(document.createElement('a'), {href:url, download:`${FILE_BASE}.zip`});
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        btn.textContent = 'Downloaded ✔';
+      }catch(err){
+        console.error(err);
+        alert('No se pudieron descargar/ensamblar las partes. Abre la consola (F12) para ver el detalle y verifica nombres/rutas.');
+        btn.textContent = 'Download (retry)';
+      }finally{ btn.disabled = false; }
+    }
+
+    document.getElementById('download').addEventListener('click', assembleZip);
+  </script>
+</body>
+</html>
