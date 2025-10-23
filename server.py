@@ -1,5 +1,5 @@
-# server.py — Servidor estático + ensamblador/descargador + extractor (Render-ready)
-# STD LIB ONLY (no requiere instalar paquetes externos)
+# server.py  —  Servidor estático + ensamblador/descargador + extractor
+# STD LIB ONLY (no requiere instalar paquetes)
 import io
 import os
 import sys
@@ -10,15 +10,14 @@ from zipfile import ZipFile
 
 # ========= CONFIG =========
 HOST        = "0.0.0.0"
-PORT        = int(os.getenv("PORT", "8080"))       # Render asigna PORT en el entorno
-BASE_DIR    = os.path.abspath(os.path.dirname(__file__))
-PUBLIC_DIR  = BASE_DIR
-PARTS_DIR   = os.path.join(PUBLIC_DIR, "files")
-
-FILE_BASE   = "CS1.6_NextClient"  # nombre base SIN extensión
-PART_COUNT  = 26                   # cantidad de partes .z01..zNN (ajusta a tu caso)
-EXT_PAD     = 2                    # z01..z09 => 2; si fuera z001..z999 => 3
-CHUNK_SIZE  = 2 * 1024 * 1024      # 2 MiB por chunk (rápido y estable)
+PORT        = 8080
+BASE_DIR    = os.path.abspath(os.path.dirname(__file__))            # carpeta donde está este server.py
+PUBLIC_DIR  = BASE_DIR                                              # sirve esta carpeta
+PARTS_DIR   = os.path.join(PUBLIC_DIR, "files")                     # subcarpeta con las partes
+FILE_BASE   = "CS1.6_NextClient"                                    # nombre base SIN extensión
+PART_COUNT  = 26                                                    # cantidad de partes .z01..zNN
+EXT_PAD     = 2                                                     # z01..z09 => 2; si fuera z001 => 3
+CHUNK_SIZE  = 2 * 1024 * 1024                                       # 2 MiB por chunk (rápido y estable)
 # ==========================
 
 def part_path(i: int) -> str:
@@ -28,7 +27,8 @@ def last_zip_path() -> str:
     return os.path.join(PARTS_DIR, f"{FILE_BASE}.zip")
 
 def iter_assembled_parts():
-    """Genera bytes concatenando z01..zNN + .zip final, en stream."""
+    """Generador que va leyendo y rindiendo cada parte + el .zip final."""
+    # Validaciones previas (fail-fast con mensaje claro)
     missing = []
     for i in range(1, PART_COUNT + 1):
         p = part_path(i)
@@ -40,7 +40,7 @@ def iter_assembled_parts():
     if missing:
         raise FileNotFoundError("Faltan archivos:\n- " + "\n- ".join(missing))
 
-    # stream: .z01 .. .zNN
+    # Stream: z01..zNN
     for i in range(1, PART_COUNT + 1):
         p = part_path(i)
         with open(p, "rb", buffering=0) as f:
@@ -49,8 +49,7 @@ def iter_assembled_parts():
                 if not chunk:
                     break
                 yield chunk
-
-    # stream: .zip final
+    # Stream: último segmento (.zip)
     with open(lz, "rb", buffering=0) as f:
         while True:
             chunk = f.read(CHUNK_SIZE)
@@ -59,7 +58,7 @@ def iter_assembled_parts():
             yield chunk
 
 def assemble_to_spooled():
-    """Ensambla a un archivo temporal en RAM/disk (Spooled) y devuelve el manejador."""
+    """Ensambla a un archivo temporal en RAM/disk (SpooledTemporaryFile) y devuelve el manejador."""
     spooled = io.SpooledTemporaryFile(max_size=64 * 1024 * 1024)  # 64MiB en RAM antes de volcar a disco
     for chunk in iter_assembled_parts():
         spooled.write(chunk)
@@ -76,8 +75,9 @@ def extract_to_dist():
     return dist_dir
 
 class Handler(SimpleHTTPRequestHandler):
-    # Sirve desde PUBLIC_DIR
+    # Servimos desde PUBLIC_DIR
     def translate_path(self, path):
+        # Copiado de SimpleHTTPRequestHandler pero forzando PUBLIC_DIR
         path = urlparse(path).path
         path = posixpath.normpath(path)
         words = [w for w in path.split('/') if w]
@@ -85,7 +85,7 @@ class Handler(SimpleHTTPRequestHandler):
         for w in words:
             drive, w = os.path.splitdrive(w)
             head, w = os.path.split(w)
-            if w in (os.curdir, os.pardir):
+            if w in (os.curdir, os.pardir): 
                 continue
             out = os.path.join(out, w)
         return out
@@ -97,7 +97,8 @@ class Handler(SimpleHTTPRequestHandler):
             self._handle_extract()
         elif self.path.startswith("/health"):
             self._ok_text("ok")
-        elif self.path in ("/", ""):
+        elif self.path == "/" or self.path == "":
+            # abre index.html por defecto
             self.path = "/index.html"
             return SimpleHTTPRequestHandler.do_GET(self)
         else:
@@ -119,12 +120,16 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Disposition", f'attachment; filename="{FILE_BASE}.zip"')
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
+
+            # Stream directo pieza por pieza
             for chunk in iter_assembled_parts():
                 self.wfile.write(chunk)
         except FileNotFoundError as e:
-            self._ok_text(f"NO_ENCONTRADAS:\n{e}", code=404)
+            msg = f"NO_ENCONTRADAS:\n{e}"
+            self._ok_text(msg, code=404)
         except BrokenPipeError:
-            pass  # cliente canceló descarga
+            # cliente canceló la descarga
+            pass
         except Exception as e:
             self._ok_text(f"ERROR: {e}", code=500)
 
@@ -142,14 +147,19 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     os.chdir(PUBLIC_DIR)
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Serving at http://0.0.0.0:{PORT}  (raíz: {PUBLIC_DIR})")
-    print("Endpoints: /  /download  /extract  /health")
+    print(f"Serving at http://localhost:{PORT}  (raíz: {PUBLIC_DIR})")
+    print("Endpoints:")
+    print("  /            -> index.html")
+    print("  /download    -> ensambla y descarga CS1.6_NextClient.zip")
+    print("  /extract     -> ensambla y descomprime en ./dist/")
+    print("  /health      -> ok")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nBye!")
-
+A
 if __name__ == "__main__":
+    # Permite cambiar puerto:  python server.py 9090
     if len(sys.argv) >= 2:
         PORT = int(sys.argv[1])
     main()
