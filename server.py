@@ -1,17 +1,13 @@
-# server.py — Render-ready
-# Reconstruye ZIP multivolumen -> EXTRAe -> sirve el artefacto principal SIN comprimir.
-# Incluye caché, diagnóstico y endpoints auxiliares. Librería estándar.
+# server.py — Render-ready con 7-Zip (p7zip-full)
+# /download-raw : extrae el ZIP multivolumen usando el archivo-guía CS1.6_NextClient.zip y entrega el artefacto principal SIN comprimir
+# /rebuild      : fuerza re-extracción (debug)
+# /concat       : concatena volúmenes y entrega binario crudo (por si alguna vez lo necesitas)
+# /diag         : diagnóstico de partes y de 7z
+# /health       : ok
 
-import io
-import os
-import sys
-import shutil
-import posixpath
-import tempfile
-import mimetypes
+import os, sys, shutil, posixpath, tempfile, mimetypes, subprocess
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
-from zipfile import ZipFile
+from urllib.parse import urlparse, parse_qs
 
 # ========= CONFIG =========
 HOST        = "0.0.0.0"
@@ -20,149 +16,144 @@ BASE_DIR    = os.path.abspath(os.path.dirname(__file__))
 PUBLIC_DIR  = BASE_DIR
 PARTS_DIR   = os.path.join(PUBLIC_DIR, "files")
 
-FILE_BASE   = "CS1.6_NextClient"   # nombre base SIN extensión
-PART_COUNT  = 26                    # cuántas .zXX hay
-EXT_PAD     = 2                     # z01..z09 => 2; si fuera z001 => 3
-CHUNK_SIZE  = 2 * 1024 * 1024       # 2 MiB por chunk
+FILE_BASE   = "CS1.6_NextClient"   # sin extensión
+PART_COUNT  = 26                    # .z01 .. .z26
+EXT_PAD     = 2                     # z01..z09 => 2
+CHUNK_SIZE  = 2 * 1024 * 1024
 
 CACHE_DIR   = os.path.join(PUBLIC_DIR, ".cache")
-COMBINED_ZIP= os.path.join(CACHE_DIR, f"{FILE_BASE}_combined.zip")
-EXTRACT_DIR = os.path.join(CACHE_DIR, "extract")  # aquí queda la extracción
+EXTRACT_DIR = os.path.join(CACHE_DIR, "extract")
+CONCAT_TMP  = os.path.join(CACHE_DIR, "__concat_tmp__")
+
+# Si quieres forzar un nombre específico como artefacto (ej. "NextClient_Setup.exe"),
+# ponlo aquí. Si None, se elegirá el más grande.
+PREFERRED_ARTIFACT_NAME = None  # ejemplo: "NextClient_Setup.exe"
+
 # ==========================
 
 LFS_SIGNATURE = b"version https://git-lfs.github.com/spec"
 
-def pp(p):  # ruta relativa para mensajes
-    return os.path.relpath(p, PUBLIC_DIR).replace("\\", "/")
+def pp(p): return os.path.relpath(p, PUBLIC_DIR).replace("\\", "/")
+def part_path(i): return os.path.join(PARTS_DIR, f"{FILE_BASE}.z{str(i).zfill(EXT_PAD)}")
+def last_zip_path(): return os.path.join(PARTS_DIR, f"{FILE_BASE}.zip")
 
-def part_path(i: int) -> str:
-    return os.path.join(PARTS_DIR, f"{FILE_BASE}.z{str(i).zfill(EXT_PAD)}")
-
-def last_zip_path() -> str:
-    return os.path.join(PARTS_DIR, f"{FILE_BASE}.zip")
-
-def required_paths():
-    return [part_path(i) for i in range(1, PART_COUNT + 1)] + [last_zip_path()]
-
-def file_head(path: str, n: int = 80) -> bytes:
+def file_head(path, n=96):
     try:
-        with open(path, "rb") as f:
-            return f.read(n)
-    except Exception:
-        return b""
+        with open(path, "rb") as f: return f.read(n)
+    except Exception: return b""
 
-def ensure_parts_exist_and_not_lfs():
-    missing = []
-    lfs = []
-    tiny = []
-    for p in required_paths():
-        if not os.path.exists(p):
-            missing.append(pp(p))
-            continue
-        sz = os.path.getsize(p)
-        h  = file_head(p)
-        if h.startswith(LFS_SIGNATURE):
-            lfs.append(pp(p))
-        if sz < 200:
-            tiny.append(f"{pp(p)} ({sz} bytes)")
+def ensure_parts_exist():
+    paths = [*map(part_path, range(1, PART_COUNT+1)), last_zip_path()]
+    missing = [pp(p) for p in paths if not os.path.exists(p)]
     if missing:
         raise RuntimeError("Faltan archivos:\n- " + "\n- ".join(missing))
-    if lfs:
+
+def ensure_not_lfs():
+    paths = [*map(part_path, range(1, PART_COUNT+1)), last_zip_path()]
+    suspects = [pp(p) for p in paths if file_head(p).startswith(LFS_SIGNATURE)]
+    if suspects:
         raise RuntimeError(
-            "Se detectaron PUNTEROS Git LFS (no binarios):\n- " +
-            "\n- ".join(lfs) +
-            "\nSolución: en Render usa build command con 'git lfs pull' o sube binarios reales."
+            "Se detectaron PUNTEROS Git LFS (no binarios):\n- " + "\n- ".join(suspects) +
+            "\nSolución: usa build command con 'git lfs pull' o sube binarios reales."
         )
-    if tiny:
-        # No bloqueamos, pero avisamos
-        sys.stderr.write("Advertencia: archivos muy pequeños:\n" + "\n".join(tiny) + "\n")
 
-def latest_parts_mtime() -> float:
-    return max(os.path.getmtime(p) for p in required_paths())
+def latest_parts_mtime():
+    paths = [*map(part_path, range(1, PART_COUNT+1)), last_zip_path()]
+    return max(os.path.getmtime(p) for p in paths)
 
-def rebuild_and_extract(force: bool=False) -> str:
+def ensure_7z():
+    try:
+        out = subprocess.check_output(["7z", "-h"], stderr=subprocess.STDOUT, text=True, timeout=10)
+        return out.splitlines()[0].strip()
+    except Exception as e:
+        raise RuntimeError("7z no está disponible. Instala con: apt-get update && apt-get install -y p7zip-full") from e
+
+def extract_with_7z(force=False):
     """
-    Concatena volúmenes -> valida -> EXTRAE a EXTRACT_DIR.
-    Usa caché si la extracción es más nueva que las partes (y no se fuerza).
-    Devuelve la ruta de la carpeta EXTRACT_DIR.
+    Usa 7-Zip para extraer ZIP multivolumen tomando como guía *exactamente* files/CS1.6_NextClient.zip.
+    Reutiliza caché si la extracción está al día.
     """
-    ensure_parts_exist_and_not_lfs()
+    ensure_parts_exist()
+    ensure_not_lfs()
+    ensure_7z()
     os.makedirs(CACHE_DIR, exist_ok=True)
 
     parts_mtime = latest_parts_mtime()
-    if os.path.exists(EXTRACT_DIR) and not force:
-        # si la extracción ya existe y es reciente, reutilizamos
-        if os.path.getmtime(EXTRACT_DIR) >= parts_mtime and any(
-            os.path.isfile(os.path.join(EXTRACT_DIR, f)) for f in os.listdir(EXTRACT_DIR)
-        ):
-            return EXTRACT_DIR
+    if os.path.isdir(EXTRACT_DIR) and not force:
+        try:
+            if os.path.getmtime(EXTRACT_DIR) >= parts_mtime and any(
+                os.path.isfile(os.path.join(EXTRACT_DIR, f)) for f in os.listdir(EXTRACT_DIR)
+            ):
+                return EXTRACT_DIR
+        except Exception:
+            pass
 
-    # Limpiar extracción previa
+    # limpiar y extraer
     if os.path.isdir(EXTRACT_DIR):
         shutil.rmtree(EXTRACT_DIR, ignore_errors=True)
     os.makedirs(EXTRACT_DIR, exist_ok=True)
 
-    # Construir combined zip temporal
-    work_dir = tempfile.mkdtemp(prefix="rebuild_", dir=CACHE_DIR)
-    combined = os.path.join(work_dir, f"{FILE_BASE}_combined.zip")
+    # Ejecutar 7z en PARTS_DIR y apuntar al último volumen (.zip)
+    cmd = ["7z", "x", "-y", f"-o{EXTRACT_DIR}", os.path.basename(last_zip_path())]
     try:
-        with open(combined, "wb") as out:
-            # .z01..zNN
-            for i in range(1, PART_COUNT + 1):
-                with open(part_path(i), "rb") as f:
-                    shutil.copyfileobj(f, out, CHUNK_SIZE)
-            # .zip final
-            with open(last_zip_path(), "rb") as f:
-                shutil.copyfileobj(f, out, CHUNK_SIZE)
+        proc = subprocess.run(cmd, cwd=PARTS_DIR, capture_output=True, text=True, timeout=None)
+    except Exception as e:
+        raise RuntimeError(f"No se pudo ejecutar 7z: {e}")
 
-        # Validar / extraer
-        try:
-            with ZipFile(combined) as zc:
-                _ = zc.namelist()     # fuerza lectura
-                zc.extractall(EXTRACT_DIR)
-        except Exception as e:
-            raise RuntimeError(
-                f"No se pudo abrir el ZIP reconstruido: {e}\n"
-                "Causas: no es ZIP dividido, orden/cantidad incorrecta o partes corruptas."
-            )
+    if proc.returncode != 0:
+        raise RuntimeError(f"7z falló (code={proc.returncode}).\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
 
-        # Tocar mtime para cache
-        os.utime(EXTRACT_DIR, (parts_mtime, parts_mtime))
-        return EXTRACT_DIR
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+    os.utime(EXTRACT_DIR, (parts_mtime, parts_mtime))
+    return EXTRACT_DIR
 
-def pick_main_artifact(folder: str) -> str:
+def pick_main_artifact(folder):
     """
-    Heurística: devolver el archivo más grande dentro de la extracción.
-    Suelen ser .exe / .msi / .zip / .7z / .pkg etc.
+    Si PREFERRED_ARTIFACT_NAME está definido, lo busca por nombre (case-insensitive).
+    Si no lo encuentra, toma el archivo más grande.
     """
-    best_path, best_size = None, -1
+    # 1) por nombre preferido
+    if PREFERRED_ARTIFACT_NAME:
+        target = PREFERRED_ARTIFACT_NAME.lower()
+        for root, _, files in os.walk(folder):
+            for name in files:
+                if name.lower() == target:
+                    return os.path.join(root, name)
+
+    # 2) por tamaño (más grande)
+    best, best_size = None, -1
     for root, _, files in os.walk(folder):
         for name in files:
             p = os.path.join(root, name)
             sz = os.path.getsize(p)
             if sz > best_size:
-                best_size = sz
-                best_path = p
-    if not best_path:
+                best_size, best = sz, p
+    if not best:
         raise RuntimeError("La extracción no produjo archivos.")
-    return best_path
+    return best
 
-def stream_file(handler: SimpleHTTPRequestHandler, path: str, download_name: str):
-    ctype, _ = mimetypes.guess_type(download_name)
-    if not ctype:
-        ctype = "application/octet-stream"
+def concat_volumes(out_path):
+    """Concatena volúmenes (por si alguna vez necesitas entregar el binario crudo)."""
+    ensure_parts_exist()
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "wb") as out:
+        for i in range(1, PART_COUNT + 1):
+            with open(part_path(i), "rb") as f:
+                shutil.copyfileobj(f, out, CHUNK_SIZE)
+        with open(last_zip_path(), "rb") as f:
+            shutil.copyfileobj(f, out, CHUNK_SIZE)
+
+def stream_file(handler, path, name):
+    ctype, _ = mimetypes.guess_type(name)
+    if not ctype: ctype = "application/octet-stream"
     length = os.path.getsize(path)
     handler.send_response(200)
     handler.send_header("Content-Type", ctype)
-    handler.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+    handler.send_header("Content-Disposition", f'attachment; filename="{name}"')
     handler.send_header("Content-Length", str(length))
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("Connection", "keep-alive")
     handler.send_header("X-Accel-Buffering", "no")
     handler.end_headers()
-
     with open(path, "rb", buffering=0) as f:
         while True:
             chunk = f.read(CHUNK_SIZE)
@@ -172,45 +163,45 @@ def stream_file(handler: SimpleHTTPRequestHandler, path: str, download_name: str
             except (BrokenPipeError, ConnectionResetError):
                 return
 
-def diag_report() -> str:
+def diag_report():
     lines = []
     lines.append(f"ROOT: {PUBLIC_DIR}")
     lines.append(f"PARTS_DIR: {pp(PARTS_DIR)}")
     lines.append(f"CACHE_DIR: {pp(CACHE_DIR)}")
-    lines.append(f"BASE: {FILE_BASE}  PART_COUNT: {PART_COUNT}  PAD: {EXT_PAD}")
-    lines.append("")
+    lines.append(f"BASE: {FILE_BASE}, PARTS: {PART_COUNT}, PAD: {EXT_PAD}")
+    # 7z
+    try:
+        lines.append("7z: " + ensure_7z())
+    except Exception as e:
+        lines.append("7z: NO DISPONIBLE -> " + str(e))
+    # partes
     ok = True
-    for p in required_paths():
-        rel = pp(p)
+    for i in range(1, PART_COUNT+1):
+        p = part_path(i)
         if not os.path.exists(p):
-            lines.append(f"[MISS] {rel}")
-            ok = False
-            continue
-        sz = os.path.getsize(p)
-        head = file_head(p, 64)
-        head_hex = head[:8].hex(" ")
-        tag = "OK"
-        if head.startswith(LFS_SIGNATURE):
-            tag = "GIT_LFS_POINTER!"
-            ok = False
-        lines.append(f"[{tag}] {rel}  size={sz}  head={head_hex}")
-    lines.append("")
-    if ok:
-        lines.append("Archivos presentes. Si /download-raw falla, puede que no sean ZIP divididos válidos.")
+            lines.append(f"[MISS] {pp(p)}"); ok = False
+        else:
+            lines.append(f"[OK]   {pp(p)}  size={os.path.getsize(p)}")
+    p = last_zip_path()
+    if not os.path.exists(p):
+        lines.append(f"[MISS] {pp(p)}"); ok = False
     else:
-        lines.append("Hay problemas (ver arriba).")
-    # Listado simple de extracción si existe
+        lines.append(f"[OK]   {pp(p)}  size={os.path.getsize(p)}")
+    lines.append("Status: " + ("OK" if ok else "FALTAN PARTES"))
+    # extract preview
     if os.path.isdir(EXTRACT_DIR):
-        lines.append("\nExtract dir exists:")
+        lines.append("\nExtract dir:")
+        shown = 0
         for root, _, files in os.walk(EXTRACT_DIR):
-            for name in files[:8]:
-                p = os.path.join(root, name)
-                lines.append(f"  - {pp(p)} ({os.path.getsize(p)} bytes)")
+            for name in files:
+                path = os.path.join(root, name)
+                lines.append(f"  - {pp(path)} ({os.path.getsize(path)} bytes)")
+                shown += 1
+                if shown >= 8: break
             break
     return "\n".join(lines)
 
 class Handler(SimpleHTTPRequestHandler):
-    # Servir desde PUBLIC_DIR
     def translate_path(self, path):
         path = urlparse(path).path
         path = posixpath.normpath(path)
@@ -225,6 +216,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/download-raw"): return self._handle_download_raw()
         if self.path.startswith("/rebuild"):      return self._handle_rebuild()
+        if self.path.startswith("/concat"):       return self._handle_concat()
         if self.path.startswith("/diag"):         return self._ok_text(diag_report())
         if self.path.startswith("/health"):       return self._ok_text("ok")
         if self.path in ("/", ""): self.path = "/index.html"
@@ -241,25 +233,36 @@ class Handler(SimpleHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def _handle_rebuild(self):
+    def _handle_download_raw(self):
+        """Extrae con 7z usando el archivo-guía CS1.6_NextClient.zip y entrega el artefacto principal SIN comprimir."""
         try:
-            folder = rebuild_and_extract(force=True)
-            # elegir artefacto principal
-            art = pick_main_artifact(folder)
-            return self._ok_text(f"REBUILT & EXTRACTED\nMain: {pp(art)} ({os.path.getsize(art)} bytes)")
+            folder = extract_with_7z(force=False)
+            mainf  = pick_main_artifact(folder)
+            return stream_file(self, mainf, os.path.basename(mainf))
         except Exception as e:
             return self._ok_text(f"ERROR: {e}", code=500)
 
-    def _handle_download_raw(self):
-        """
-        Reconstruye+extrae si hace falta y envía el archivo principal SIN comprimir.
-        Heurística: archivo más grande dentro de la extracción.
-        """
+    def _handle_rebuild(self):
+        """Fuerza re-extracción (debug)."""
         try:
-            folder = rebuild_and_extract(force=False)
-            art = pick_main_artifact(folder)
-            name = os.path.basename(art)
-            return stream_file(self, art, name)
+            folder = extract_with_7z(force=True)
+            mainf  = pick_main_artifact(folder)
+            return self._ok_text(f"REBUILT OK\nMain: {pp(mainf)} ({os.path.getsize(mainf)} bytes)")
+        except Exception as e:
+            return self._ok_text(f"ERROR: {e}", code=500)
+
+    def _handle_concat(self):
+        """Concatena y entrega el binario crudo (por si alguna vez prefieres esta opción)."""
+        try:
+            qs   = parse_qs(urlparse(self.path).query or "")
+            name = qs.get("name", [f"{FILE_BASE}.bin"])[0]
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            concat_volumes(CONCAT_TMP)
+            try:
+                return stream_file(self, CONCAT_TMP, name)
+            finally:
+                try: os.remove(CONCAT_TMP)
+                except Exception: pass
         except Exception as e:
             return self._ok_text(f"ERROR: {e}", code=500)
 
@@ -269,9 +272,10 @@ def main():
     print(f"Serving at http://0.0.0.0:{PORT}  (root: {PUBLIC_DIR})")
     print("Endpoints:")
     print("  /             -> index.html")
-    print("  /download-raw -> reconstruye + extrae + entrega artefacto principal (sin comprimir)")
-    print("  /rebuild      -> fuerza reconstrucción y extracción (debug)")
-    print("  /diag         -> diagnóstico de volúmenes")
+    print("  /download-raw -> extrae con 7z desde files/CS1.6_NextClient.zip (guía) y entrega artefacto principal (sin comprimir)")
+    print("  /rebuild      -> fuerza re-extracción")
+    print("  /concat?name=CS1.6_NextClient.exe -> concatena y entrega binario crudo (opcional)")
+    print("  /diag         -> diagnóstico")
     print("  /health       -> ok")
     try:
         httpd.serve_forever()
@@ -279,6 +283,4 @@ def main():
         print("\nBye!")
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 2:
-        PORT = int(sys.argv[1])
     main()
