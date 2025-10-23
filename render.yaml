@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: cs16-nextclient
+    env: python
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python server.py"
+    healthCheckPath: "/health"
