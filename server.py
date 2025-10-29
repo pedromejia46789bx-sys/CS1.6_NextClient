@@ -1,286 +1,173 @@
-# server.py — Render-ready con 7-Zip (p7zip-full)
-# /download-raw : extrae el ZIP multivolumen usando el archivo-guía CS1.6_NextClient.zip y entrega el artefacto principal SIN comprimir
-# /rebuild      : fuerza re-extracción (debug)
-# /concat       : concatena volúmenes y entrega binario crudo (por si alguna vez lo necesitas)
-# /diag         : diagnóstico de partes y de 7z
-# /health       : ok
-
-import os, sys, shutil, posixpath, tempfile, mimetypes, subprocess
+import os, json
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, unquote
 
-# ========= CONFIG =========
-HOST        = "0.0.0.0"
-PORT        = int(os.getenv("PORT", "8080"))
-BASE_DIR    = os.path.abspath(os.path.dirname(__file__))
-PUBLIC_DIR  = BASE_DIR
-PARTS_DIR   = os.path.join(PUBLIC_DIR, "files")
+PORT = int(os.getenv("PORT", "8080"))
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-FILE_BASE   = "CS1.6_NextClient"   # sin extensión
-PART_COUNT  = 26                    # .z01 .. .z26
-EXT_PAD     = 2                     # z01..z09 => 2
-CHUNK_SIZE  = 2 * 1024 * 1024
-
-CACHE_DIR   = os.path.join(PUBLIC_DIR, ".cache")
-EXTRACT_DIR = os.path.join(CACHE_DIR, "extract")
-CONCAT_TMP  = os.path.join(CACHE_DIR, "__concat_tmp__")
-
-# Si quieres forzar un nombre específico como artefacto (ej. "NextClient_Setup.exe"),
-# ponlo aquí. Si None, se elegirá el más grande.
-PREFERRED_ARTIFACT_NAME = None  # ejemplo: "NextClient_Setup.exe"
-
-# ==========================
-
-LFS_SIGNATURE = b"version https://git-lfs.github.com/spec"
-
-def pp(p): return os.path.relpath(p, PUBLIC_DIR).replace("\\", "/")
-def part_path(i): return os.path.join(PARTS_DIR, f"{FILE_BASE}.z{str(i).zfill(EXT_PAD)}")
-def last_zip_path(): return os.path.join(PARTS_DIR, f"{FILE_BASE}.zip")
-
-def file_head(path, n=96):
-    try:
-        with open(path, "rb") as f: return f.read(n)
-    except Exception: return b""
-
-def ensure_parts_exist():
-    paths = [*map(part_path, range(1, PART_COUNT+1)), last_zip_path()]
-    missing = [pp(p) for p in paths if not os.path.exists(p)]
-    if missing:
-        raise RuntimeError("Faltan archivos:\n- " + "\n- ".join(missing))
-
-def ensure_not_lfs():
-    paths = [*map(part_path, range(1, PART_COUNT+1)), last_zip_path()]
-    suspects = [pp(p) for p in paths if file_head(p).startswith(LFS_SIGNATURE)]
-    if suspects:
-        raise RuntimeError(
-            "Se detectaron PUNTEROS Git LFS (no binarios):\n- " + "\n- ".join(suspects) +
-            "\nSolución: usa build command con 'git lfs pull' o sube binarios reales."
-        )
-
-def latest_parts_mtime():
-    paths = [*map(part_path, range(1, PART_COUNT+1)), last_zip_path()]
-    return max(os.path.getmtime(p) for p in paths)
-
-def ensure_7z():
-    try:
-        out = subprocess.check_output(["7z", "-h"], stderr=subprocess.STDOUT, text=True, timeout=10)
-        return out.splitlines()[0].strip()
-    except Exception as e:
-        raise RuntimeError("7z no está disponible. Instala con: apt-get update && apt-get install -y p7zip-full") from e
-
-def extract_with_7z(force=False):
-    """
-    Usa 7-Zip para extraer ZIP multivolumen tomando como guía *exactamente* files/CS1.6_NextClient.zip.
-    Reutiliza caché si la extracción está al día.
-    """
-    ensure_parts_exist()
-    ensure_not_lfs()
-    ensure_7z()
-    os.makedirs(CACHE_DIR, exist_ok=True)
-
-    parts_mtime = latest_parts_mtime()
-    if os.path.isdir(EXTRACT_DIR) and not force:
-        try:
-            if os.path.getmtime(EXTRACT_DIR) >= parts_mtime and any(
-                os.path.isfile(os.path.join(EXTRACT_DIR, f)) for f in os.listdir(EXTRACT_DIR)
-            ):
-                return EXTRACT_DIR
-        except Exception:
-            pass
-
-    # limpiar y extraer
-    if os.path.isdir(EXTRACT_DIR):
-        shutil.rmtree(EXTRACT_DIR, ignore_errors=True)
-    os.makedirs(EXTRACT_DIR, exist_ok=True)
-
-    # Ejecutar 7z en PARTS_DIR y apuntar al último volumen (.zip)
-    cmd = ["7z", "x", "-y", f"-o{EXTRACT_DIR}", os.path.basename(last_zip_path())]
-    try:
-        proc = subprocess.run(cmd, cwd=PARTS_DIR, capture_output=True, text=True, timeout=None)
-    except Exception as e:
-        raise RuntimeError(f"No se pudo ejecutar 7z: {e}")
-
-    if proc.returncode != 0:
-        raise RuntimeError(f"7z falló (code={proc.returncode}).\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}")
-
-    os.utime(EXTRACT_DIR, (parts_mtime, parts_mtime))
-    return EXTRACT_DIR
-
-def pick_main_artifact(folder):
-    """
-    Si PREFERRED_ARTIFACT_NAME está definido, lo busca por nombre (case-insensitive).
-    Si no lo encuentra, toma el archivo más grande.
-    """
-    # 1) por nombre preferido
-    if PREFERRED_ARTIFACT_NAME:
-        target = PREFERRED_ARTIFACT_NAME.lower()
-        for root, _, files in os.walk(folder):
-            for name in files:
-                if name.lower() == target:
-                    return os.path.join(root, name)
-
-    # 2) por tamaño (más grande)
-    best, best_size = None, -1
-    for root, _, files in os.walk(folder):
-        for name in files:
-            p = os.path.join(root, name)
-            sz = os.path.getsize(p)
-            if sz > best_size:
-                best_size, best = sz, p
-    if not best:
-        raise RuntimeError("La extracción no produjo archivos.")
-    return best
-
-def concat_volumes(out_path):
-    """Concatena volúmenes (por si alguna vez necesitas entregar el binario crudo)."""
-    ensure_parts_exist()
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "wb") as out:
-        for i in range(1, PART_COUNT + 1):
-            with open(part_path(i), "rb") as f:
-                shutil.copyfileobj(f, out, CHUNK_SIZE)
-        with open(last_zip_path(), "rb") as f:
-            shutil.copyfileobj(f, out, CHUNK_SIZE)
-
-def stream_file(handler, path, name):
-    ctype, _ = mimetypes.guess_type(name)
-    if not ctype: ctype = "application/octet-stream"
-    length = os.path.getsize(path)
-    handler.send_response(200)
-    handler.send_header("Content-Type", ctype)
-    handler.send_header("Content-Disposition", f'attachment; filename="{name}"')
-    handler.send_header("Content-Length", str(length))
-    handler.send_header("Cache-Control", "no-store")
-    handler.send_header("Connection", "keep-alive")
-    handler.send_header("X-Accel-Buffering", "no")
-    handler.end_headers()
-    with open(path, "rb", buffering=0) as f:
-        while True:
-            chunk = f.read(CHUNK_SIZE)
-            if not chunk: break
-            try:
-                handler.wfile.write(chunk)
-            except (BrokenPipeError, ConnectionResetError):
-                return
-
-def diag_report():
-    lines = []
-    lines.append(f"ROOT: {PUBLIC_DIR}")
-    lines.append(f"PARTS_DIR: {pp(PARTS_DIR)}")
-    lines.append(f"CACHE_DIR: {pp(CACHE_DIR)}")
-    lines.append(f"BASE: {FILE_BASE}, PARTS: {PART_COUNT}, PAD: {EXT_PAD}")
-    # 7z
-    try:
-        lines.append("7z: " + ensure_7z())
-    except Exception as e:
-        lines.append("7z: NO DISPONIBLE -> " + str(e))
-    # partes
-    ok = True
-    for i in range(1, PART_COUNT+1):
-        p = part_path(i)
-        if not os.path.exists(p):
-            lines.append(f"[MISS] {pp(p)}"); ok = False
-        else:
-            lines.append(f"[OK]   {pp(p)}  size={os.path.getsize(p)}")
-    p = last_zip_path()
-    if not os.path.exists(p):
-        lines.append(f"[MISS] {pp(p)}"); ok = False
-    else:
-        lines.append(f"[OK]   {pp(p)}  size={os.path.getsize(p)}")
-    lines.append("Status: " + ("OK" if ok else "FALTAN PARTES"))
-    # extract preview
-    if os.path.isdir(EXTRACT_DIR):
-        lines.append("\nExtract dir:")
-        shown = 0
-        for root, _, files in os.walk(EXTRACT_DIR):
-            for name in files:
-                path = os.path.join(root, name)
-                lines.append(f"  - {pp(path)} ({os.path.getsize(path)} bytes)")
-                shown += 1
-                if shown >= 8: break
-            break
-    return "\n".join(lines)
+# Carpeta donde viven manifest.json y las partes
+PARTS_DIR = os.path.join(BASE_DIR, os.getenv("PARTS_DIR", "files"))
+# (compat) si quieres forzar un nombre de descarga distinto al del manifest:
+DOWNLOAD_NAME_OVERRIDE = os.getenv("DOWNLOAD_FILE")  # opcional
 
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
         path = urlparse(path).path
-        path = posixpath.normpath(path)
-        words = [w for w in path.split('/') if w]
-        out = PUBLIC_DIR
-        for w in words:
-            _, w = os.path.split(w)
-            if w in (os.curdir, os.pardir): continue
-            out = os.path.join(out, w)
-        return out
+        path = unquote(path)
+        if path in ("/", ""):
+            path = "/index.html"
+        return os.path.join(BASE_DIR, path.lstrip("/"))
+
+    def list_directory(self, path):
+        self.send_error(403, "Directory listing disabled")
+        return None
 
     def do_GET(self):
-        if self.path.startswith("/download-raw"): return self._handle_download_raw()
-        if self.path.startswith("/rebuild"):      return self._handle_rebuild()
-        if self.path.startswith("/concat"):       return self._handle_concat()
-        if self.path.startswith("/diag"):         return self._ok_text(diag_report())
-        if self.path.startswith("/health"):       return self._ok_text("ok")
-        if self.path in ("/", ""): self.path = "/index.html"
+        p = urlparse(self.path).path
+        if p == "/diag":
+            return self._diag()
+        if p == "/where":
+            return self._where()
+        if p == "/download":
+            return self._send_download_streaming()
         return super().do_GET()
 
-    def _ok_text(self, text, code=200):
-        data = text.encode("utf-8")
+    # -------- utilidades --------
+    def _load_manifest(self):
+        man_path = os.path.join(PARTS_DIR, "manifest.json")
+        if not os.path.exists(man_path):
+            return None, f"manifest.json no encontrado en {PARTS_DIR}"
         try:
-            self.send_response(code)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-    def _handle_download_raw(self):
-        """Extrae con 7z usando el archivo-guía CS1.6_NextClient.zip y entrega el artefacto principal SIN comprimir."""
-        try:
-            folder = extract_with_7z(force=False)
-            mainf  = pick_main_artifact(folder)
-            return stream_file(self, mainf, os.path.basename(mainf))
+            with open(man_path, "r", encoding="utf-8") as mf:
+                manifest = json.load(mf)
+            if "filename" not in manifest or "parts" not in manifest:
+                return None, "manifest.json inválido: falta 'filename' o 'parts'"
+            if not isinstance(manifest["parts"], list) or not manifest["parts"]:
+                return None, "manifest.json inválido: 'parts' vacío"
+            return manifest, None
         except Exception as e:
-            return self._ok_text(f"ERROR: {e}", code=500)
+            return None, f"Error leyendo manifest.json: {e}"
 
-    def _handle_rebuild(self):
-        """Fuerza re-extracción (debug)."""
-        try:
-            folder = extract_with_7z(force=True)
-            mainf  = pick_main_artifact(folder)
-            return self._ok_text(f"REBUILT OK\nMain: {pp(mainf)} ({os.path.getsize(mainf)} bytes)")
-        except Exception as e:
-            return self._ok_text(f"ERROR: {e}", code=500)
+    def _iter_parts(self, manifest):
+        """
+        Itera (ruta_absoluta, size_declarado) en el orden declarado por manifest["parts"].
+        Cada item de 'parts' debe tener al menos 'path'; 'size' es opcional.
+        """
+        for entry in manifest["parts"]:
+            rel = entry.get("path")
+            if not rel:
+                raise FileNotFoundError("Entrada de parte sin 'path' en manifest")
+            abs_path = os.path.join(PARTS_DIR, rel)
+            if not os.path.exists(abs_path):
+                raise FileNotFoundError(f"Parte no encontrada: {rel}")
+            declared_size = entry.get("size")
+            yield abs_path, declared_size
 
-    def _handle_concat(self):
-        """Concatena y entrega el binario crudo (por si alguna vez prefieres esta opción)."""
+    def _total_length_from_manifest(self, manifest):
+        total = 0
+        complete = True
+        for entry in manifest.get("parts", []):
+            s = entry.get("size")
+            if isinstance(s, int):
+                total += s
+            else:
+                complete = False
+                break
+        return total if complete else None
+
+    # -------- endpoints --------
+    def _send_download_streaming(self):
+        # 1) Cargar manifest
+        manifest, err = self._load_manifest()
+        if err:
+            self.send_error(404, err)
+            return
+
+        filename = DOWNLOAD_NAME_OVERRIDE or manifest.get("filename", "download.bin")
+        mime = manifest.get("mime", "application/octet-stream")
+
+        # 2) Calcular Content-Length si posible (suma sizes del manifest)
+        content_length = self._total_length_from_manifest(manifest)
+
+        # 3) Responder headers
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        if content_length is not None:
+            self.send_header("Content-Length", str(content_length))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+
+        # 4) Enviar concatenación de partes en bloques
         try:
-            qs   = parse_qs(urlparse(self.path).query or "")
-            name = qs.get("name", [f"{FILE_BASE}.bin"])[0]
-            os.makedirs(CACHE_DIR, exist_ok=True)
-            concat_volumes(CONCAT_TMP)
+            for abs_path, _declared in self._iter_parts(manifest):
+                with open(abs_path, "rb") as f:
+                    while True:
+                        chunk = f.read(64 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+        except FileNotFoundError as e:
+            # Si alguna parte falta, devolvemos 500 después de headers
+            # (el cliente verá descarga interrumpida)
+            # Para depurar fácil:
             try:
-                return stream_file(self, CONCAT_TMP, name)
-            finally:
-                try: os.remove(CONCAT_TMP)
-                except Exception: pass
-        except Exception as e:
-            return self._ok_text(f"ERROR: {e}", code=500)
+                self.wfile.write(f"\nERROR: {e}".encode("utf-8"))
+            except Exception:
+                pass
+
+    def _diag(self):
+        def tree(root):
+            lines = []
+            for dirpath, dirnames, filenames in os.walk(root):
+                rel = os.path.relpath(dirpath, root)
+                rel = "." if rel == "." else rel
+                lines.append(f"[{rel}]")
+                for d in sorted(dirnames):
+                    lines.append(f"  <DIR> {d}")
+                for f in sorted(filenames):
+                    lines.append(f"       {f}")
+            return "\n".join(lines)
+
+        manifest, err = self._load_manifest()
+        man_info = "NO MANIFEST" if err else json.dumps(
+            {"filename": manifest.get("filename"),
+             "mime": manifest.get("mime"),
+             "parts_count": len(manifest.get("parts", []))},
+            ensure_ascii=False, indent=2
+        )
+
+        msg = (
+            f"BASE_DIR: {BASE_DIR}\n"
+            f"PARTS_DIR: {PARTS_DIR}\n"
+            f"PORT: {PORT}\n\n"
+            f"Manifest: {man_info}\n\n"
+            f"Estructura de archivos (BASE_DIR):\n{tree(BASE_DIR)}\n"
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(msg)))
+        self.end_headers()
+        self.wfile.write(msg)
+
+    def _where(self):
+        man_path = os.path.join(PARTS_DIR, "manifest.json")
+        info = f"BASE_DIR={BASE_DIR}\nPARTS_DIR={PARTS_DIR}\nMANIFEST={man_path}\n"
+        data = info.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
 def main():
-    os.chdir(PUBLIC_DIR)
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Serving at http://0.0.0.0:{PORT}  (root: {PUBLIC_DIR})")
-    print("Endpoints:")
-    print("  /             -> index.html")
-    print("  /download-raw -> extrae con 7z desde files/CS1.6_NextClient.zip (guía) y entrega artefacto principal (sin comprimir)")
-    print("  /rebuild      -> fuerza re-extracción")
-    print("  /concat?name=CS1.6_NextClient.exe -> concatena y entrega binario crudo (opcional)")
-    print("  /diag         -> diagnóstico")
-    print("  /health       -> ok")
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nBye!")
+    os.chdir(BASE_DIR)
+    httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    print(f"[OK] Server en http://localhost:{PORT}/")
+    print("  /          -> index.html")
+    print("  /download  -> reconstruye y descarga desde manifest+partes")
+    print("  /diag      -> diagnóstico (árbol de archivos y manifest)")
+    print("  /where     -> rutas internas (BASE_DIR, PARTS_DIR, manifest)")
+    httpd.serve_forever()
 
 if __name__ == "__main__":
     main()
