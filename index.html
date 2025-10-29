@@ -3,158 +3,81 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NextClient — CS 1.6 Landing (Clone)</title>
-
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <title>NextClient — CS 1.6 Landing</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
-
   <style>
     :root{
-      --bg: #ffffff;
-      --ink: #0d0f12;
-      --muted:#5c667a;
-      --primary:#1e66ff;
-      --accent:#cfe2ff;
-      --ring:#e7edf9;
-      --surface:#f2f6ff;
+      --bg:#ffffff; --ink:#0d0f12; --muted:#5c667a;
+      --primary:#1e66ff; --primary-ink:#0f3fb3;
+      --accent:#cfe2ff; --surface:#f2f6ff; --ring:#e7edf9;
+      --panel:#2d3a4f;
     }
-
-    *{box-sizing:border-box}
+    *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%}
     body{
-      margin:0;
-      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
-      color:var(--ink);
-      background: var(--bg);
-      overflow-x: hidden;
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial,"Apple Color Emoji","Segoe UI Emoji";
+      color:var(--ink);background:var(--bg);overflow-x:hidden
     }
-
-    /* Layout */
     .site{position:relative;min-height:100dvh;display:flex;flex-direction:column;isolation:isolate}
 
     /* Header */
-    header{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:16px;
-      padding:20px clamp(16px, 5vw, 48px);
-      position:relative;
-      z-index:2;
-    }
-    .brand{display:flex;align-items:center;gap:12px;font-weight:900;letter-spacing:.2px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+           padding:20px clamp(16px,5vw,48px);position:relative;z-index:2}
+    .brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:.2px}
     .brand svg{width:28px;height:28px}
     .brand span{font-size:18px}
     .actions{display:flex;align-items:center;gap:12px}
-    .iconbtn{
-      width:40px;height:40px;border-radius:999px;border:1px solid var(--ring);
-      display:grid;place-items:center;background:#fff;cursor:pointer;
-      transition:transform .15s ease, box-shadow .15s ease;
-      box-shadow:0 1px 0 0 rgba(13,15,18,.04), 0 8px 24px rgba(13,15,18,.06);
-    }
+    .iconbtn{width:40px;height:40px;border-radius:999px;border:1px solid var(--ring);
+             display:grid;place-items:center;background:#fff;cursor:pointer;
+             transition:transform .15s ease, box-shadow .15s ease;
+             box-shadow:0 1px 0 0 rgba(13,15,18,.04), 0 8px 24px rgba(13,15,18,.06)}
     .iconbtn:hover{transform:translateY(-1px)}
 
     /* Hero */
-    .hero{
-      display:grid;
-      grid-template-columns: 1.1fr 1fr;
-      gap: clamp(24px, 4vw, 56px);
-      align-items:center;
-      padding: 24px clamp(16px, 5vw, 48px) 64px;
-      position:relative;
-      z-index:1;
-    }
-    .headline{
-      font-size: clamp(36px, 5.6vw, 64px);
-      line-height:1.02;
-      font-weight:900;
-      letter-spacing:-.8px;
-      margin: 8px 0 18px;
-    }
+    .hero{display:grid;grid-template-columns:1.1fr 1fr;gap:clamp(24px,4vw,56px);align-items:center;
+          padding:24px clamp(16px,5vw,48px) 64px;position:relative;z-index:1}
+    .headline{font-size:clamp(36px,5.6vw,64px);line-height:1.02;font-weight:900;letter-spacing:-.8px;margin:8px 0 18px}
     .headline a{color:var(--primary);text-decoration:none}
     .accentword{color:var(--primary);font-weight:900}
-    .lead{
-      color:var(--muted);
-      font-size: clamp(14px, 1.9vw, 16px);
-      line-height:1.6;
-      max-width: 60ch;
-    }
+    .lead{color:var(--muted);font-size:clamp(14px,1.9vw,16px);line-height:1.6;max-width:60ch}
     .cta{display:flex;gap:14px;flex-wrap:wrap;margin-top:28px}
-    .btn{
-      appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:10px;
-      padding:14px 18px;border-radius:999px;font-weight:800;font-size:16px;
-      transition:transform .15s ease, box-shadow .15s ease, background .2s ease;
-      text-decoration:none;
-    }
+    .btn{appearance:none;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:10px;
+         padding:14px 18px;border-radius:999px;font-weight:800;font-size:16px;
+         transition:transform .15s ease, box-shadow .15s ease, background .2s ease; text-decoration:none}
     .btn-primary{background:var(--primary);color:#fff;box-shadow:0 10px 24px rgba(30,102,255,.28)}
     .btn-primary:hover{transform:translateY(-1px);background:#1556e6}
     .btn-outline{background:#fff;border:1px solid var(--ring);color:#0d0f12}
     .subtag{font-size:12px;opacity:.75;margin-left:10px}
 
-    /* Mock device block */
-    .mock{
-      position:relative;aspect-ratio: 1.3/1;min-height:360px;border-radius:28px;overflow:hidden;
-      box-shadow:0 40px 80px rgba(13,15,18,.18), inset 0 0 0 1px rgba(255,255,255,.08);
-      background: radial-gradient(1200px 600px at 30% 20%, #102c57 0, #121a28 40%, #0d121c 100%);
-    }
-    .scanline{position:absolute;inset:0;background-image:repeating-linear-gradient(to bottom, rgba(255,255,255,.06), rgba(255,255,255,.06) 1px, transparent 1px, transparent 3px);mix-blend:overlay;opacity:.25}
-
-    /* Progress card */
-    .panel{
-      position:absolute;left:8%;bottom:12%;
-      width:min(520px, 86%);
-      background:#2d3a4f;border:1px solid rgba(255,255,255,.08);color:#eaf1ff;
-      border-radius:14px;padding:16px;box-shadow:0 14px 34px rgba(0,0,0,.35);
-      font-size:14px
-    }
-    .panel small{opacity:.8}
+    /* Mock / Panel */
+    .mock{position:relative;aspect-ratio:1.3/1;min-height:360px;border-radius:28px;overflow:hidden;
+          box-shadow:0 40px 80px rgba(13,15,18,.18), inset 0 0 0 1px rgba(255,255,255,.08);
+          background: radial-gradient(1200px 600px at 30% 20%, #102c57 0, #121a28 40%, #0d121c 100%)}
+    .scanline{position:absolute;inset:0;
+              background-image:repeating-linear-gradient(to bottom, rgba(255,255,255,.06),
+              rgba(255,255,255,.06) 1px, transparent 1px, transparent 3px);
+              mix-blend:overlay;opacity:.25;pointer-events:none}
+    .panel{position:absolute;left:8%;bottom:12%;width:min(520px, 86%);background:var(--panel);
+           border:1px solid rgba(255,255,255,.08);color:#eaf1ff;border-radius:14px;padding:16px;
+           box-shadow:0 14px 34px rgba(0,0,0,.35);font-size:14px;will-change:transform}
     .row{display:flex;align-items:center;justify-content:space-between;margin:6px 0 10px}
     .bar{height:12px;border-radius:32px;background:rgba(255,255,255,.1);overflow:hidden}
     .bar > span{display:block;height:100%;width:0%;background:linear-gradient(90deg,#8fd0ff,#e7ff7a)}
     .bar.thin{height:10px}
-    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.08);font-size:12px}
 
-    /* Big background blob */
-    .blob{
-      position:absolute;right:-20vw;top:-10vh;width:80vw;height:80vh;border-top-left-radius:60vw;border-bottom-left-radius:60vw;background: radial-gradient(100% 100% at 30% 20%, #d7e7ff 0, #b8d1ff 40%, #a7c4ff 60%, #cfe0ff 100%);
-      filter:saturate(125%);z-index:0;opacity:.7;
-    }
+    /* Blob del fondo */
+    .blob{position:absolute;right:-20vw;top:-10vh;width:80vw;height:80vh;border-top-left-radius:60vw;border-bottom-left-radius:60vw;
+          background: radial-gradient(100% 100% at 30% 20%, #d7e7ff 0, #b8d1ff 40%, #a7c4ff 60%, #cfe0ff 100%);
+          filter:saturate(125%);z-index:0;opacity:.7}
 
-    /* Features section (extra) */
-    .features{
-      padding: 24px clamp(16px, 5vw, 48px) 64px;
-      display:grid;
-      grid-template-columns: repeat(3, minmax(0,1fr));
-      gap:24px;
-    }
-    .card{
-      background:#fff;
-      border:1px solid var(--ring);
-      border-radius:16px;
-      padding:18px;
-      box-shadow:0 8px 24px rgba(13,15,18,.06);
-    }
-    .card h3{margin:6px 0 8px}
-    .card p{margin:0;color:var(--muted)}
-    @media (max-width: 980px){.features{grid-template-columns:1fr}}
-
-    /* Footer */
-    footer{padding:28px clamp(16px, 5vw, 48px);color:#6b778e;font-size:14px}
-
-    /* Responsive */
-    @media (max-width: 980px){
-      .hero{grid-template-columns:1fr}
-      .mock{order:-1}
-    }
+    footer{padding:28px clamp(16px,5vw,48px);color:#6b778e;font-size:14px}
+    @media (max-width:980px){.hero{grid-template-columns:1fr}.mock{order:-1}}
   </style>
 </head>
 <body>
   <div class="site">
     <div class="blob" aria-hidden="true"></div>
 
-    <!-- Header -->
     <header>
       <div class="brand" title="NextClient">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -163,115 +86,100 @@
         <span>NEXTCLIENT</span>
       </div>
       <div class="actions">
-        <button class="iconbtn" aria-label="GitHub" title="GitHub">G</button>
-        <button class="iconbtn" aria-label="Telegram" title="Telegram">T</button>
+        <a class="iconbtn" href="https://github.com/" target="_blank" aria-label="GitHub">G</a>
+        <a class="iconbtn" href="https://t.me/" target="_blank" aria-label="Telegram">T</a>
       </div>
     </header>
 
-    <!-- Hero -->
     <main class="hero">
       <section>
-        <h1 class="headline">A modern, under development <a href="#">CS 1.6</a> client based on 8684 steam version, enriched with <span class="accentword">genuine</span> features</h1>
-        <p class="lead">NextClient aims to introduce those features that Counter-Strike players have been dreaming about for years. Enhanced security, redesigned interface with the ability to change the theme, fastest download of resources and list of game servers, Steam player avatars and more.</p>
+        <h1 class="headline">
+          A modern, under development <a href="#">CS 1.6</a> client based on 8684 steam version, enriched with
+          <span class="accentword">genuine</span> features
+        </h1>
+        <p class="lead">
+          NextClient aims to introduce those features that Counter-Strike players have been dreaming about for years.
+          Enhanced security, redesigned interface with the ability to change the theme, fastest download of resources and list of game servers, Steam player avatars and more.
+        </p>
         <div class="cta">
-          <a class="btn btn-outline" href="#features">Learn More</a>
-
-          <!-- 🔽 Usa el endpoint del servidor Python -->
-          <a class="btn btn-primary" href="/download-raw">Download</a>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download <span class="subtag">server-fast</span>
+          <a class="btn btn-outline" href="#">Learn More</a>
+          <!-- Mantiene tu funcionalidad: descarga desde el server Python -->
+          <a class="btn btn-primary" id="downloadBtn" href="/download">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:6px">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download <span class="subtag">(latest)</span>
           </a>
         </div>
       </section>
 
       <aside class="mock" aria-label="App preview">
         <div class="scanline" aria-hidden="true"></div>
-        <div class="panel" role="dialog" aria-label="Загрузка…">
+        <div class="panel" role="dialog" aria-label="Downloading…">
           <div class="row">
-            <strong>Загрузка…</strong>
-            <span class="pill"><small>Осталось:</small><b id="eta">1 сек</b></span>
+            <strong id="statusTxt">Preparing…</strong>
+            <small id="etaTxt">ETA: ~8s</small>
           </div>
-          <div class="row">
-            <small>Файлы: <b id="files">0</b> / 51</small>
-            <small><span id="mb">0.0</span> / 55.6 MB, <span id="speed">0.0</span> MB/s</small>
-          </div>
-          <div class="bar"><span id="bar1"></span></div>
+          <div class="bar"><span id="barMain"></span></div>
           <div style="height:10px"></div>
-          <div class="row" style="margin-top:8px"><small>models/wpn_v8/v_knife.mdl</small> <small>Отмена</small></div>
-          <div class="bar thin"><span id="bar2"></span></div>
+          <div class="row" style="margin-top:8px">
+            <small id="fileTxt">assembling parts…</small>
+            <small id="okTxt">OK</small>
+          </div>
+          <div class="bar thin"><span id="barSub"></span></div>
         </div>
       </aside>
     </main>
 
-    <!-- Extra: Features -->
-    <section id="features" class="features">
-      <article class="card">
-        <h3>Enhanced Security</h3>
-        <p>Hardened client with safer defaults and integrity checks.</p>
-      </article>
-      <article class="card">
-        <h3>Modern UI</h3>
-        <p>Theme switching, refined layouts, readable typography.</p>
-      </article>
-      <article class="card">
-        <h3>Fast Delivery</h3>
-        <p>Optimized resources list and quick server fetching.</p>
-      </article>
-    </section>
-
-    <!-- Footer -->
     <footer>
-      <span>Unofficial educational clone created for personal use. All names are placeholders.</span>
+      <span>Educational clone — Not affiliated with Valve. Made for testing only.</span>
     </footer>
   </div>
 
   <script>
-    // Mini animaciones (visuales). No afectan la descarga del servidor.
-    const $ = (q)=>document.querySelector(q);
+    // Animación decorativa infinita: inicia al cargar la página y nunca se detiene.
+    document.addEventListener("DOMContentLoaded", () => {
+      const $ = (q)=>document.querySelector(q);
+      const panel  = $('.panel');
+      const barMain= $('#barMain');
+      const barSub = $('#barSub');
+      const status = $('#statusTxt');
+      const eta    = $('#etaTxt');
+      const file   = $('#fileTxt');
 
-    const bar1 = $('#bar1');
-    const bar2 = $('#bar2');
-    const files = $('#files');
-    const mb = $('#mb');
-    const speed = $('#speed');
-    const eta = $('#eta');
+      // Flotación suave infinita
+      let y = 0, dir = 1;
+      function floatLoop(){
+        y += 0.06 * dir;
+        if (y > 6 || y < -6) dir *= -1;
+        panel.style.transform = `translateY(${y}px)`;
+        requestAnimationFrame(floatLoop);
+      }
+      requestAnimationFrame(floatLoop);
 
-    let t = 0, totalFiles = 51, totalMb = 55.6;
+      // Barras de "progreso" infinito (decorativo)
+      let t = 0;
+      const easeOutCubic = (x)=> 1 - Math.pow(1 - x, 3);
+      function progressLoop(){
+        t += (Math.random()*0.020 + 0.010);
+        if (t >= 1) t = 0;                // reinicia en bucle
+        const p  = easeOutCubic(Math.min(1,t));
+        const p2 = Math.min(1, p * 1.12);
 
-    function tick(){
-      t = Math.min(1, t + (Math.random()*0.025 + 0.01));
-      const eased = 1 - Math.pow(1 - t, 3);
-      bar1.style.width = (eased*100).toFixed(2)+'%';
-      bar2.style.width = (Math.min(1, eased*1.12)*100).toFixed(2)+'%';
-      files.textContent = Math.round(totalFiles*eased);
-      const doneMb = (totalMb*eased);
-      mb.textContent = doneMb.toFixed(1);
-      const spd = (0.9 + Math.random()*2.1).toFixed(2);
-      speed.textContent = spd;
-      const remain = Math.max(0, (1-eased)*8);
-      eta.textContent = (remain<1? (remain*1000|0)/1000 + ' сек' : Math.ceil(remain) + ' сек');
-      if(t<1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
+        barMain.style.width = (p*100).toFixed(2) + '%';
+        barSub.style.width  = (p2*100).toFixed(2) + '%';
 
-    // Smooth scroll
-    document.querySelector('a[href="#features"]').addEventListener('click', (e)=>{
-      e.preventDefault();
-      document.querySelector('#features').scrollIntoView({behavior:'smooth'});
+        const secs = Math.max(0, (1-p) * 8);
+        eta.textContent    = `ETA: ${secs < 1 ? (secs*1000|0)/1000 + 's' : Math.ceil(secs) + 's'}`;
+        status.textContent = p < 0.15 ? 'Preparing…' : (p < 0.75 ? 'Downloading…' : 'Finishing…');
+        file.textContent   = p < 0.5 ? 'assembling parts…' : 'verifying chunks…';
+
+        requestAnimationFrame(progressLoop);
+      }
+      requestAnimationFrame(progressLoop);
     });
-
-    // Subtle float for the panel
-    const panel = document.querySelector('.panel');
-    let dir = 1, y = 0;
-    function float(){
-      y += 0.06*dir;
-      if(y>6 || y<-6) dir*=-1;
-      panel.style.transform = `translateY(${y}px)`;
-      requestAnimationFrame(float);
-    }
-    requestAnimationFrame(float);
   </script>
 </body>
 </html>
-
-
